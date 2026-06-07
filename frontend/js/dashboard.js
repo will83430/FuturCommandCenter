@@ -15,7 +15,7 @@ async function renderDashboard() {
       api.domotique.status().catch(() => null),
       api.weather().catch(() => null)
     ])
-    const lastActivity = Array.isArray(lastActs) ? lastActs[0] : null
+    const lastActivity = (lastActs?.activities || lastActs)?.[0] || null
 
     const topExpenses = cats
       .filter(c => c.kind === 'expense')

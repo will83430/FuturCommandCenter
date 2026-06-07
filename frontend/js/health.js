@@ -1051,9 +1051,15 @@ async function loadRecords() {
       if (hasDistance && totalKm) items.push({ icon:'🗺️', label:'Total distance', val: totalKm+' km' })
       if (r.max_elevation > 0) items.push({ icon:'⬆️', label:'D+ record', val: Math.round(r.max_elevation)+'m' })
       if (r.max_avg_hr) items.push({ icon:'❤️', label:'FC moy. max', val: Math.round(r.max_avg_hr)+' bpm' })
-      if (r.best_pace && hasDistance) {
-        const sPerKm = 1000 / r.best_pace
-        items.push({ icon:'⚡', label:'Meilleure allure', val: Math.floor(sPerKm/60)+':'+String(Math.round(sPerKm%60)).padStart(2,'0')+'/km' })
+      if (r.best_speed && hasDistance) {
+        const spd = parseFloat(r.best_speed)
+        const isRunning = ['running','trail_running'].includes(r.type)
+        if (isRunning) {
+          const sPerKm = 1000 / spd
+          items.push({ icon:'⚡', label:'Meilleure allure', val: Math.floor(sPerKm/60)+':'+String(Math.round(sPerKm%60)).padStart(2,'0')+'/km' })
+        } else {
+          items.push({ icon:'🚀', label:'Vitesse moy. max', val: (spd*3.6).toFixed(1)+' km/h' })
+        }
       }
 
       return `

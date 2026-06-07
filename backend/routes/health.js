@@ -474,7 +474,7 @@ router.get('/records', async (req, res) => {
         MAX(duration_s) AS max_duration,
         MAX(calories) AS max_calories,
         MAX(avg_hr) AS max_avg_hr,
-        MIN(NULLIF(avg_pace, 0)) AS best_pace,
+        MAX(avg_pace) AS best_speed,
         MAX(steps) AS max_steps,
         (SELECT id FROM activities a2 WHERE a2.type = a.type AND a2.distance_m = MAX(a.distance_m) LIMIT 1) AS best_dist_id,
         (SELECT id FROM activities a2 WHERE a2.type = a.type AND a2.elevation_m = MAX(a.elevation_m) LIMIT 1) AS best_elev_id
