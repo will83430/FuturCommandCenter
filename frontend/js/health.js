@@ -85,6 +85,16 @@ async function renderHealth() {
         </div>
       </div>
     </div>
+
+    <!-- Records personnels -->
+    <div class="section-title">Records personnels</div>
+    <div id="recordsGrid" class="records-grid"><div class="loading-text">Chargement…</div></div>
+
+    <!-- Progression mensuelle -->
+    <div class="section-title">Progression — 12 derniers mois</div>
+    <div class="health-panel" style="margin-bottom:20px">
+      <div class="chart-container"><canvas id="progressionChart"></canvas></div>
+    </div>
   `
 
   checkGarminStatus()
@@ -94,6 +104,8 @@ async function renderHealth() {
   loadDailyCharts()
   loadByType()
   loadBodyMetrics()
+  loadRecords()
+  loadProgression()
 }
 
 // ── Statut Garmin ─────────────────────────────────────────────────────────
@@ -1003,4 +1015,115 @@ function formatDuration(seconds) {
 }
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString('fr-FR', { day:'2-digit', month:'short' })
+}
+
+// ── Records personnels ────────────────────────────────────────────────────
+const SPORT_META = {
+  hiking:            { icon:'🥾', label:'Randonnée' },
+  running:           { icon:'🏃', label:'Course' },
+  cycling:           { icon:'🚴', label:'Vélo' },
+  strength_training: { icon:'🏋️', label:'Musculation' },
+  swimming:          { icon:'🏊', label:'Natation' },
+  resort_skiing:     { icon:'⛷️', label:'Ski' },
+  walking:           { icon:'🚶', label:'Marche' },
+  trail_running:     { icon:'🏔️', label:'Trail' },
+  indoor_cycling:    { icon:'🚴', label:'Home-trainer' }
+}
+
+async function loadRecords() {
+  const el = document.getElementById('recordsGrid')
+  if (!el) return
+  try {
+    const records = await api.health.records()
+    if (!records.length) { el.innerHTML = '<p class="no-data">Aucune activité</p>'; return }
+
+    el.innerHTML = records.map(r => {
+      const meta = SPORT_META[r.type] || { icon:'🏅', label: r.type }
+      const distKm = r.max_distance ? (r.max_distance/1000).toFixed(1) : null
+      const totalKm = r.total_distance ? (r.total_distance/1000).toFixed(0) : null
+      const totalH = r.total_duration ? Math.round(r.total_duration/3600) : null
+      const hasDistance = r.max_distance > 0
+      const items = []
+
+      items.push({ icon:'🔢', label:'Séances', val: r.count })
+      if (totalH)  items.push({ icon:'⏱', label:'Total temps', val: totalH+'h' })
+      if (hasDistance && distKm) items.push({ icon:'📍', label:'+ longue', val: distKm+' km' })
+      if (hasDistance && totalKm) items.push({ icon:'🗺️', label:'Total distance', val: totalKm+' km' })
+      if (r.max_elevation > 0) items.push({ icon:'⬆️', label:'D+ record', val: Math.round(r.max_elevation)+'m' })
+      if (r.max_avg_hr) items.push({ icon:'❤️', label:'FC moy. max', val: Math.round(r.max_avg_hr)+' bpm' })
+      if (r.best_pace && hasDistance) {
+        const sPerKm = 1000 / r.best_pace
+        items.push({ icon:'⚡', label:'Meilleure allure', val: Math.floor(sPerKm/60)+':'+String(Math.round(sPerKm%60)).padStart(2,'0')+'/km' })
+      }
+
+      return `
+        <div class="record-card">
+          <div class="record-header">
+            <span class="record-icon">${meta.icon}</span>
+            <span class="record-sport">${meta.label}</span>
+          </div>
+          <div class="record-items">
+            ${items.map(it => `
+              <div class="record-item">
+                <span class="record-item-icon">${it.icon}</span>
+                <span class="record-item-val">${it.val}</span>
+                <span class="record-item-lbl">${it.label}</span>
+              </div>`).join('')}
+          </div>
+        </div>`
+    }).join('')
+  } catch (e) {
+    el.innerHTML = '<p class="no-data">Erreur chargement records</p>'
+  }
+}
+
+// ── Progression mensuelle ────────────────────────────────────────────────
+async function loadProgression() {
+  const el = document.getElementById('progressionChart')
+  if (!el || !window.Chart) return
+  try {
+    const rows = await api.health.progression(12)
+    if (!rows.length) return
+
+    const months = [...new Set(rows.map(r => r.month))].sort()
+    const types  = [...new Set(rows.map(r => r.type))]
+    const COLORS = { hiking:'#22c55e', running:'#3b82f6', cycling:'#f59e0b', strength_training:'#a78bfa', resort_skiing:'#00d4ff', swimming:'#06b6d4', walking:'#94a3b8', trail_running:'#10b981', indoor_cycling:'#f97316' }
+
+    const datasets = types.map(type => {
+      const meta = SPORT_META[type] || { label: type }
+      const hasDistance = rows.filter(r => r.type === type).some(r => r.total_distance > 0)
+      const data = months.map(m => {
+        const row = rows.find(r => r.month === m && r.type === type)
+        if (!row) return 0
+        return hasDistance ? +(row.total_distance/1000).toFixed(1) : +row.count
+      })
+      return {
+        label: meta.label + (hasDistance ? ' (km)' : ' (séances)'),
+        data, backgroundColor: (COLORS[type] || '#64748b') + '99',
+        borderColor: COLORS[type] || '#64748b',
+        borderWidth: 2, borderRadius: 4, borderSkipped: false
+      }
+    })
+
+    const labels = months.map(m => {
+      const [y, mo] = m.split('-')
+      return new Date(y, mo-1).toLocaleDateString('fr-FR', { month:'short', year:'2-digit' })
+    })
+
+    new Chart(el, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {
+          legend: { labels: { color:'#94a3b8', font:{ size:11 }, boxWidth:12 } },
+          tooltip: { backgroundColor:'#1e293b', titleColor:'#e2e8f0', bodyColor:'#94a3b8', borderColor:'#334155', borderWidth:1 }
+        },
+        scales: {
+          x: { ticks:{ color:'#64748b', font:{ size:10 } }, grid:{ color:'#ffffff06' }, border:{ display:false } },
+          y: { ticks:{ color:'#94a3b8', font:{ size:10 } }, grid:{ color:'#ffffff08' }, border:{ display:false } }
+        }
+      }
+    })
+  } catch (e) { console.error('progression', e) }
 }

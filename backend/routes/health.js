@@ -459,6 +459,56 @@ router.delete('/body-metrics/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
+// ── Records personnels ────────────────────────────────────────────────────
+router.get('/records', async (req, res) => {
+  try {
+    const rows = await pool.query(`
+      SELECT
+        type,
+        COUNT(*) AS count,
+        SUM(duration_s) AS total_duration,
+        SUM(COALESCE(distance_m, 0)) AS total_distance,
+        SUM(COALESCE(elevation_m, 0)) AS total_elevation,
+        MAX(distance_m) AS max_distance,
+        MAX(elevation_m) AS max_elevation,
+        MAX(duration_s) AS max_duration,
+        MAX(calories) AS max_calories,
+        MAX(avg_hr) AS max_avg_hr,
+        MIN(NULLIF(avg_pace, 0)) AS best_pace,
+        MAX(steps) AS max_steps,
+        (SELECT id FROM activities a2 WHERE a2.type = a.type AND a2.distance_m = MAX(a.distance_m) LIMIT 1) AS best_dist_id,
+        (SELECT id FROM activities a2 WHERE a2.type = a.type AND a2.elevation_m = MAX(a.elevation_m) LIMIT 1) AS best_elev_id
+      FROM activities a
+      WHERE type IS NOT NULL
+      GROUP BY type
+      ORDER BY count DESC
+    `)
+    res.json(rows.rows)
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// ── Progression mensuelle ─────────────────────────────────────────────────
+router.get('/progression', async (req, res) => {
+  try {
+    const months = Math.min(parseInt(req.query.months) || 12, 24)
+    const rows = await pool.query(`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', date), 'YYYY-MM') AS month,
+        type,
+        COUNT(*) AS count,
+        SUM(COALESCE(distance_m, 0)) AS total_distance,
+        SUM(duration_s) AS total_duration,
+        SUM(COALESCE(elevation_m, 0)) AS total_elevation
+      FROM activities
+      WHERE date >= NOW() - INTERVAL '${months} months'
+        AND type IS NOT NULL
+      GROUP BY DATE_TRUNC('month', date), type
+      ORDER BY 1 ASC, 2
+    `)
+    res.json(rows.rows)
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 // ── Statut Garmin ──────────────────────────────────────────────────────────
 router.get('/garmin-status', (req, res) => {
   res.json({ configured: !!(GARMIN_EMAIL && GARMIN_PASSWORD), lastAutoSync })

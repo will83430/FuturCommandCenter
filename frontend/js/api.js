@@ -26,6 +26,7 @@ window.api = {
     chat:    (msg)   => apiFetch('/ai/chat', { method: 'POST', body: JSON.stringify({ message: msg }) }),
     clear:   ()      => apiFetch('/ai/history', { method: 'DELETE' })
   },
+  weather: () => apiFetch('/weather'),
   domotique: {
     status:           ()       => apiFetch('/domotique/status'),
     presence:         ()       => apiFetch('/domotique/presence'),
@@ -47,6 +48,8 @@ window.api = {
     today:        ()       => apiFetch('/health/today'),
     byType:       ()       => apiFetch('/health/by-type'),
     garminStatus:  ()      => apiFetch('/health/garmin-status'),
+    records:       ()      => apiFetch('/health/records'),
+    progression:   (m)     => apiFetch(`/health/progression?months=${m||12}`),
     bodyMetrics:   (days)  => apiFetch(`/health/body-metrics?days=${days||90}`),
     addBodyMetric: (data)  => apiFetch('/health/body-metrics', { method:'POST', body: JSON.stringify(data) }),
     delBodyMetric: (id)    => apiFetch(`/health/body-metrics/${id}`, { method:'DELETE' }),

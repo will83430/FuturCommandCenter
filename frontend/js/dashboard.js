@@ -3,15 +3,19 @@ async function renderDashboard() {
   el.innerHTML = '<div class="loading">Chargement du dashboard</div>'
 
   try {
-    const [summary, monthly, cats, balance, forecast, healthSummary, todayHealth] = await Promise.all([
+    const [summary, monthly, cats, balance, forecast, healthSummary, todayHealth, lastActs, domo, weather] = await Promise.all([
       api.finances.summary(),
       api.finances.monthly(),
       api.finances.byCategory(),
       api.finances.balance(),
       api.finances.forecast(),
       api.health.summary().catch(() => null),
-      api.health.today().catch(() => null)
+      api.health.today().catch(() => null),
+      api.health.activities({ limit: 1 }).catch(() => []),
+      api.domotique.status().catch(() => null),
+      api.weather().catch(() => null)
     ])
+    const lastActivity = Array.isArray(lastActs) ? lastActs[0] : null
 
     const topExpenses = cats
       .filter(c => c.kind === 'expense')
@@ -30,6 +34,37 @@ async function renderDashboard() {
       <div class="page-header">
         <h1>⚡ Dashboard</h1>
         <p>Vue d'ensemble — ${new Date().toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}</p>
+      </div>
+
+      <!-- Widgets rapides -->
+      <div class="dash-widgets">
+        ${weather ? `
+          <div class="dash-widget weather-widget">
+            <span class="dw-icon">${weather.icon}</span>
+            <div class="dw-main">
+              <span class="dw-val">${weather.temp}°C</span>
+              <span class="dw-label">${weather.label}</span>
+            </div>
+            <div class="dw-sub">Ressenti ${weather.feels}°C · ${weather.humidity}% · ${weather.wind} km/h</div>
+          </div>` : ''}
+        ${lastActivity ? `
+          <div class="dash-widget activity-widget" onclick="document.querySelector('[data-page=health]').click()">
+            <span class="dw-icon">${actIcon(lastActivity.type)}</span>
+            <div class="dw-main">
+              <span class="dw-val">${lastActivity.name || lastActivity.type}</span>
+              <span class="dw-label">Dernière activité · ${new Date(lastActivity.date).toLocaleDateString('fr-FR', {day:'numeric',month:'short'})}</span>
+            </div>
+            <div class="dw-sub">${lastActivity.distance_m ? (lastActivity.distance_m/1000).toFixed(1)+'km · ' : ''}${lastActivity.duration_s ? fmtDur(lastActivity.duration_s) : ''}</div>
+          </div>` : ''}
+        ${domo?.bulbs ? `
+          <div class="dash-widget lights-widget" onclick="document.querySelector('[data-page=domotique]').click()">
+            <span class="dw-icon">💡</span>
+            <div class="dw-main">
+              <span class="dw-val">Lumières</span>
+              <span class="dw-label">${domo.bulbs?.bulbs?.length || 0} ampoule(s)</span>
+            </div>
+            <div class="dw-sub">Walter · ${domo.robot?.state === 'DOCKED' ? 'Docké 🔋'+domo.robot.battery+'%' : domo.robot?.state || '—'}</div>
+          </div>` : ''}
       </div>
 
       <!-- Santé du jour -->
@@ -164,6 +199,11 @@ async function renderDashboard() {
   } catch (err) {
     el.innerHTML = `<div class="card" style="color:var(--accent-red)">Erreur : ${err.message}</div>`
   }
+}
+
+function actIcon(type) {
+  const m = { hiking:'🥾', running:'🏃', cycling:'🚴', strength_training:'🏋️', swimming:'🏊', resort_skiing:'⛷️', walking:'🚶', trail_running:'🏔️', indoor_cycling:'🚴' }
+  return m[type] || '🏅'
 }
 
 function dashHealthCard(icon, label, value, sub) {
