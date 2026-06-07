@@ -1,0 +1,53 @@
+const { app, BrowserWindow, ipcMain } = require('electron')
+const path = require('path')
+const { fork } = require('child_process')
+
+let mainWindow
+let backendProcess
+
+function startBackend() {
+  const envPath     = app.isPackaged ? path.join(process.resourcesPath, '.env')            : path.join(__dirname, '.env')
+  const garminPath  = app.isPackaged ? path.join(process.resourcesPath, '.garmin-session') : path.join(__dirname, '.garmin-session')
+  backendProcess = fork(path.join(__dirname, 'backend/server.js'), [], {
+    env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'production', DOTENV_PATH: envPath, GARMIN_TOKEN_DIR: garminPath }
+  })
+  backendProcess.on('message', (msg) => {
+    if (msg === 'ready') createWindow()
+  })
+  backendProcess.on('error', (err) => console.error('Backend error:', err))
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1100,
+    minHeight: 700,
+    frame: false,
+    backgroundColor: '#0a0e1a',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    },
+    icon: app.isPackaged
+      ? path.join(process.resourcesPath, 'icon.png')
+      : path.join(__dirname, 'build/icon.png')
+  })
+
+  mainWindow.loadFile('frontend/index.html')
+
+}
+
+ipcMain.on('window-minimize', () => mainWindow.minimize())
+ipcMain.on('window-maximize', () => {
+  mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
+})
+ipcMain.on('window-close', () => mainWindow.close())
+
+app.whenReady().then(startBackend)
+
+app.on('window-all-closed', () => {
+  if (backendProcess) backendProcess.kill()
+  if (process.platform !== 'darwin') app.quit()
+})

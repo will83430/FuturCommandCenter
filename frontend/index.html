@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:3737; img-src 'self' data: https://*.tile.openstreetmap.org; font-src 'self'">
+  <title>FuturCommandCenter</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/leaflet.css">
+</head>
+<body>
+  <!-- Barre titre custom (frameless) -->
+  <div class="titlebar">
+    <div class="titlebar-logo">
+      <span class="logo-icon">⚡</span>
+      <span class="logo-text">FuturCommandCenter</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="ctrl-btn minimize" onclick="window.electronAPI.minimize()">─</button>
+      <button class="ctrl-btn maximize" onclick="window.electronAPI.maximize()">□</button>
+      <button class="ctrl-btn close"    onclick="window.electronAPI.close()">✕</button>
+    </div>
+  </div>
+
+  <!-- Layout principal -->
+  <div class="app-layout">
+    <!-- Sidebar navigation -->
+    <nav class="sidebar">
+      <div class="nav-items">
+        <button class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-page="finances">
+          <span class="nav-icon">💳</span>
+          <span class="nav-label">Finances</span>
+        </button>
+        <button class="nav-item" data-page="transactions">
+          <span class="nav-icon">📋</span>
+          <span class="nav-label">Transactions</span>
+        </button>
+        <button class="nav-item" data-page="ai">
+          <span class="nav-icon">🤖</span>
+          <span class="nav-label">Assistant IA</span>
+        </button>
+        <button class="nav-item" data-page="health">
+          <span class="nav-icon">💪</span>
+          <span class="nav-label">Sport &amp; Santé</span>
+        </button>
+        <button class="nav-item" data-page="domotique">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Domotique</span>
+        </button>
+      </div>
+      <div class="sidebar-status" id="sidebarStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Connecté</span>
+      </div>
+    </nav>
+
+    <!-- Contenu principal -->
+    <main class="main-content">
+      <div id="page-dashboard" class="page active"></div>
+      <div id="page-finances"     class="page"></div>
+      <div id="page-transactions" class="page"></div>
+      <div id="page-ai"           class="page"></div>
+      <div id="page-health"       class="page"></div>
+      <div id="page-domotique"   class="page"></div>
+    </main>
+  </div>
+
+  <script src="js/chart.umd.js"></script>
+  <script src="js/leaflet.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/finances.js"></script>
+  <script src="js/transactions.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/health.js"></script>
+  <script src="js/domotique.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
