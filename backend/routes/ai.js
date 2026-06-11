@@ -1,10 +1,85 @@
 const express = require('express')
 const router  = express.Router()
 const axios   = require('axios')
+const dgram   = require('dgram')
 const pool    = require('../database/db')
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   || 'http://localhost:11434'
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b'
+const HC_URL = process.env.HOMECONTROL_URL || 'http://localhost:5000'
+const HC_KEY = process.env.HOMECONTROL_KEY || ''
+
+// IPs des ampoules WiZ
+const BULBS = { salon: '192.168.1.171', chambre: '192.168.1.85' }
+
+// Couleurs nommées → RGB
+const COLOR_MAP = {
+  rouge: [255,0,0], vert: [0,255,0], bleu: [0,0,255], blanc: [255,255,255],
+  jaune: [255,255,0], orange: [255,100,0], violet: [148,0,211], mauve: [180,0,180],
+  rose: [255,20,147], cyan: [0,255,255], turquoise: [0,206,209], indigo: [75,0,130],
+  noir: [0,0,0], chaud: [255,180,60], froid: [200,220,255]
+}
+
+function hc(path, method = 'GET', data = null) {
+  return axios({ method, url: `${HC_URL}${path}`, headers: { 'X-API-Key': HC_KEY }, data: data || undefined, timeout: 8000 }).then(r => r.data)
+}
+
+function wizSend(ip, params) {
+  return new Promise((resolve, reject) => {
+    const sock = dgram.createSocket('udp4')
+    const msg  = Buffer.from(JSON.stringify({ method: 'setPilot', params }))
+    sock.send(msg, 38899, ip, err => { sock.close(); err ? reject(err) : resolve() })
+  })
+}
+
+const TOOLS = [
+  { type: 'function', function: { name: 'lights_on',    description: 'Allumer les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
+  { type: 'function', function: { name: 'lights_off',   description: 'Éteindre les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
+  { type: 'function', function: { name: 'lights_color', description: 'Changer la couleur des lumières. Utilise color_name pour les couleurs courantes (rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid) ou r/g/b pour du RGB précis.', parameters: { type: 'object', properties: { color_name: { type: 'string', description: 'Nom de couleur : rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid' }, r: { type: 'integer' }, g: { type: 'integer' }, b: { type: 'integer' } } } } }
+]
+
+async function executeTool(name, args) {
+  const room = args.room?.toLowerCase()
+  const ips  = room ? (BULBS[room] ? [BULBS[room]] : Object.values(BULBS)) : Object.values(BULBS)
+
+  if (name === 'lights_on') {
+    await Promise.all(ips.map(ip => wizSend(ip, { state: true })))
+    return { ok: true }
+  }
+  if (name === 'lights_off') {
+    await Promise.all(ips.map(ip => wizSend(ip, { state: false })))
+    return { ok: true }
+  }
+  if (name === 'lights_color') {
+    let [r, g, b] = args.color_name ? (COLOR_MAP[args.color_name.toLowerCase()] || [255,255,255]) : [args.r||0, args.g||0, args.b||0]
+    await Promise.all(ips.map(ip => wizSend(ip, { r, g, b })))
+    return { ok: true, r, g, b }
+  }
+  throw new Error(`Outil inconnu : ${name}`)
+}
+
+async function streamOllama(messages, tools, res) {
+  const reqBody = { model: OLLAMA_MODEL, messages, stream: true }
+  if (tools) reqBody.tools = tools
+  const ollamaRes = await axios.post(`${OLLAMA_URL}/api/chat`, reqBody, { responseType: 'stream' })
+  let fullReply = '', toolCalls = null
+  await new Promise((resolve, reject) => {
+    ollamaRes.data.on('data', chunk => {
+      chunk.toString().split('\n').filter(Boolean).forEach(line => {
+        try {
+          const json = JSON.parse(line)
+          const token = json.message?.content || ''
+          if (token) { fullReply += token; res.write(`data: ${JSON.stringify({ token })}\n\n`) }
+          if (json.message?.tool_calls?.length) toolCalls = json.message.tool_calls
+          if (json.done) resolve()
+        } catch {}
+      })
+    })
+    ollamaRes.data.on('end', resolve)
+    ollamaRes.data.on('error', reject)
+  })
+  return { fullReply, toolCalls }
+}
 
 // Historique des messages
 router.get('/history', async (req, res) => {
@@ -118,6 +193,13 @@ ${la ? `Dernière activité : ${la.name} (${la.type}) le ${new Date(la.date).toL
     const systemPrompt = `Tu es l'assistant IA de FuturCommandCenter, le dashboard personnel de l'utilisateur.
 Tu as accès aux données financières et sportives en temps réel. Sois concis et utile. Réponds en français.
 
+OUTILS DISPONIBLES — tu DOIS les utiliser quand l'utilisateur le demande :
+- lights_on(room?) : allumer les lumières. Pièces : "Salon", "Chambre". Vide = toutes.
+- lights_off(room?) : éteindre les lumières. Pièces : "Salon", "Chambre". Vide = toutes.
+- lights_color(r, g, b) : changer la couleur en valeurs RGB (0-255).
+Quand on te demande de contrôler les lumières, utilise TOUJOURS l'outil correspondant. Ne refuse jamais — tu en as la capacité.
+Après avoir exécuté un outil, réponds en 1 phrase courte uniquement (ex: "Lumière de la chambre éteinte."). Ne simule pas d'actions, n'écris pas "ACTION EFFECTUÉE", ne liste pas les données financières ou sportives sauf si on te le demande explicitement.
+
 SOLDES ACTUELS :
 ${balancesText}
 Total disponible (hors crédit) : ${fmt(totalDisponible)}€
@@ -147,41 +229,51 @@ ${healthContext}`
     res.setHeader('Cache-Control', 'no-cache')
     res.setHeader('Connection', 'keep-alive')
 
-    const ollamaRes = await axios.post(`${OLLAMA_URL}/api/chat`, {
-      model: OLLAMA_MODEL,
-      messages,
-      stream: true
-    }, { responseType: 'stream' })
+    // Appel non-streaming pour détecter les tool_calls de façon fiable
+    const detectRes = await axios.post(`${OLLAMA_URL}/api/chat`, {
+      model: OLLAMA_MODEL, messages, tools: TOOLS, stream: false
+    })
+    const detectMsg = detectRes.data?.message || {}
+    const toolCalls = detectMsg.tool_calls?.length ? detectMsg.tool_calls : null
 
-    let fullReply = ''
-    ollamaRes.data.on('data', chunk => {
-      const lines = chunk.toString().split('\n').filter(Boolean)
-      for (const line of lines) {
+    const ACTION_CONFIRM = {
+      lights_on:    (a) => `Lumière${a.room ? ' '+a.room : 's'} allumée${a.room ? '' : 's'}.`,
+      lights_off:   (a) => `Lumière${a.room ? ' '+a.room : 's'} éteinte${a.room ? '' : 's'}.`,
+      lights_color: (a) => `Couleur ${a.color_name || `R${a.r} V${a.g} B${a.b}`} appliquée.`
+    }
+
+    let savedReply = ''
+    if (toolCalls) {
+      let confirmParts = []
+      for (const tc of toolCalls) {
+        const name = tc.function.name
+        const args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : (tc.function.arguments || {})
+        res.write(`data: ${JSON.stringify({ action: name, args })}\n\n`)
         try {
-          const json = JSON.parse(line)
-          const token = json.message?.content || ''
-          if (token) {
-            fullReply += token
-            res.write(`data: ${JSON.stringify({ token })}\n\n`)
-          }
-          if (json.done) {
-            res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
-          }
-        } catch {}
+          await executeTool(name, args)
+          res.write(`data: ${JSON.stringify({ action_done: name, ok: true })}\n\n`)
+          confirmParts.push(ACTION_CONFIRM[name]?.(args) || 'Action effectuée.')
+        } catch (e) {
+          res.write(`data: ${JSON.stringify({ action_done: name, ok: false })}\n\n`)
+          confirmParts.push(`Erreur : ${e.message}`)
+        }
       }
-    })
-
-    ollamaRes.data.on('end', async () => {
-      if (fullReply) {
-        await pool.query(
-          'INSERT INTO ai_messages (role, content) VALUES ($1, $2)',
-          ['assistant', fullReply]
-        )
+      // Confirmation directe, sans appeler le modèle
+      savedReply = confirmParts.join(' ')
+      for (const ch of savedReply) {
+        res.write(`data: ${JSON.stringify({ token: ch })}\n\n`)
       }
-      res.end()
-    })
+    } else {
+      // Pas d'outil → stream direct
+      const { fullReply } = await streamOllama(messages, null, res)
+      savedReply = fullReply
+    }
 
-    ollamaRes.data.on('error', () => res.end())
+    if (savedReply) {
+      await pool.query('INSERT INTO ai_messages (role, content) VALUES ($1, $2)', ['assistant', savedReply])
+    }
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+    res.end()
 
   } catch (err) {
     if (err.code === 'ECONNREFUSED') {
