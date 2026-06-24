@@ -3,7 +3,28 @@ const fs   = require('fs')
 const path = require('path')
 const pool = require('../backend/database/db')
 
-const SOURCE = process.argv[2] || path.join(require('os').homedir(), 'moncarnetcompte_backup.json')
+function findLatestExport() {
+  const home = require('os').homedir()
+  const dirs = [
+    path.join(__dirname, '../exports'),
+    path.join(home, 'Téléchargements'),
+    path.join(home, 'Downloads'),
+    home
+  ]
+  let latest = null, latestTime = 0
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith('moncarnetcompte_') || !f.endsWith('.json')) continue
+      const full = path.join(dir, f)
+      const t = fs.statSync(full).mtimeMs
+      if (t > latestTime) { latestTime = t; latest = full }
+    }
+  }
+  return latest || path.join(home, 'moncarnetcompte_backup.json')
+}
+
+const SOURCE = process.argv[2] || findLatestExport()
 
 async function run() {
   if (!fs.existsSync(SOURCE)) {
