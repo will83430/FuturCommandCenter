@@ -229,9 +229,14 @@ ${healthContext}`
     res.setHeader('Cache-Control', 'no-cache')
     res.setHeader('Connection', 'keep-alive')
 
+    // N'active les outils que si le message parle de lumières
+    const LIGHT_KEYWORDS = /lumi[eè]re|lampe|ampoule|lumière|allume|éteins|éteint|couleur|salon|chambre|bleu|rouge|vert|violet|rose|jaune|orange|cyan|blanc/i
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || ''
+    const mightUseTool = LIGHT_KEYWORDS.test(lastUserMsg)
+
     // Appel non-streaming pour détecter les tool_calls de façon fiable
     const detectRes = await axios.post(`${OLLAMA_URL}/api/chat`, {
-      model: OLLAMA_MODEL, messages, tools: TOOLS, stream: false
+      model: OLLAMA_MODEL, messages, ...(mightUseTool ? { tools: TOOLS } : {}), stream: false
     })
     const detectMsg = detectRes.data?.message || {}
     const toolCalls = detectMsg.tool_calls?.length ? detectMsg.tool_calls : null
