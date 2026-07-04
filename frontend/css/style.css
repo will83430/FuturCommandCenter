@@ -153,6 +153,8 @@ button { cursor: pointer; border: none; background: none; color: inherit; font: 
 .dhc-value { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1.2; }
 .dhc-label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
 .dhc-sub   { font-size: 10px; color: var(--text-dim); }
+.dhc-sparkline { display: block; margin-top: 4px; opacity: 0.75; }
+.dhc-spark { gap: 2px; }
 
 .balance-cards {
   display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 4px;
@@ -294,6 +296,36 @@ tr:hover td { background: var(--bg-hover); }
 .bar-track { flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 8px; overflow: hidden; }
 .bar-fill  { height: 100%; border-radius: 4px; background: var(--accent); transition: width .5s; }
 .bar-value { width: 80px; font-size: 12px; color: var(--text); text-align: right; }
+
+/* Tooltip hover sur les barres */
+.bar-row { position: relative; }
+.bar-row[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  margin-left: 210px;
+  background: #0f1628; border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 11px; white-space: nowrap;
+  padding: 4px 8px; border-radius: 6px; pointer-events: none;
+  z-index: 10;
+}
+
+/* Conteneur graphique */
+.chart-wrap { position: relative; }
+.chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+/* En-tête de carte avec actions à droite */
+.card-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; }
+.card-header-row .card-title { margin-bottom: 0; }
+
+/* Sélecteur de période */
+.period-btns { display: flex; gap: 4px; }
+.period-btn {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 11px; padding: 3px 10px;
+  border-radius: 6px; cursor: pointer; transition: all .15s;
+}
+.period-btn:hover { border-color: var(--accent); color: var(--text); }
+.period-btn.active { background: var(--accent)22; border-color: var(--accent)66; color: var(--accent); }
 
 /* ========== SPORT & SANTÉ ========== */
 .health-grid   { display: flex; flex-direction: column; gap: 20px; }
