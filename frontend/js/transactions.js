@@ -57,8 +57,8 @@ async function renderTransactions(reset = true) {
                 <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${tx.description}</td>
                 <td><span class="badge badge-${tx.kind}">${tx.cat}</span></td>
                 <td style="color:var(--text-muted)">${tx.account_id}</td>
-                <td class="${tx.kind==='income'?'amount-income':'amount-expense'}">
-                  ${tx.kind==='income'?'+':'-'}${(tx.amount_cents/100).toLocaleString('fr-FR',{minimumFractionDigits:2})} €
+                <td class="${['income','transfer_in'].includes(tx.kind)?'amount-income':'amount-expense'}">
+                  ${['income','transfer_in'].includes(tx.kind)?'+':'-'}${(tx.amount_cents/100).toLocaleString('fr-FR',{minimumFractionDigits:2})} €
                 </td>
               </tr>
             `).join('')}

@@ -248,6 +248,10 @@ tr:hover td { background: var(--bg-hover); }
 }
 .msg.user .msg-bubble      { background: var(--accent-2); color: #fff; border-radius: 12px 4px 12px 12px; }
 .msg.assistant .msg-bubble { background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px 12px 12px 12px; }
+.action-tag { display: flex; width: fit-content; align-items: center; gap: 6px; font-size: 11px; padding: 3px 10px; border-radius: 20px; margin: 0 0 4px; }
+.action-tag.loading { background: rgba(99,102,241,.15); color: var(--accent); }
+.action-tag.done    { background: rgba(34,197,94,.15);  color: #22c55e; }
+.action-tag.error   { background: rgba(239,68,68,.15);  color: #ef4444; }
 .chat-input-wrap {
   display: flex; gap: 10px; padding: 16px;
   border-top: 1px solid var(--border);
@@ -265,6 +269,8 @@ tr:hover td { background: var(--bg-hover); }
 }
 .chat-send:hover    { opacity: .85; }
 .chat-send:disabled { opacity: .4; cursor: not-allowed; }
+.chat-clear { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; font-size: 16px; transition: background .2s; }
+.chat-clear:hover { background: rgba(239,68,68,.15); }
 .typing { color: var(--text-muted); font-style: italic; font-size: 12px; padding: 0 16px; }
 
 /* ========== PAGINATION ========== */

@@ -7,3 +7,5 @@ build/
 *.log
 .garmin-session.json
 .garmin-session
+exports/*
+!exports/.gitkeep

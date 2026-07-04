@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wpctl status *)",
+      "Bash(wpctl inspect *)",
+      "Bash(pw-cli list-objects *)",
+      "Bash(node --check *)",
+      "Bash(adb devices)",
+      "Bash(journalctl *)",
+      "Bash(systemctl status *)"
+    ]
+  }
+}

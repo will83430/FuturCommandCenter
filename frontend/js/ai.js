@@ -1,3 +1,12 @@
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 async function renderAI() {
   const el = document.getElementById('page-ai')
   el.innerHTML = `
@@ -16,6 +25,7 @@ async function renderAI() {
       <div class="chat-input-wrap">
         <textarea id="chatInput" class="chat-input" rows="2" placeholder="Pose une question sur tes finances..."></textarea>
         <button id="chatSend" class="chat-send" onclick="sendMessage()">Envoyer</button>
+        <button class="chat-clear" onclick="clearChat()" title="Vider l'historique">🗑️</button>
       </div>
     </div>
   `
@@ -33,6 +43,12 @@ async function renderAI() {
   })
 }
 
+async function clearChat() {
+  if (!confirm('Vider tout l\'historique ?')) return
+  await api.ai.clear()
+  renderAI()
+}
+
 function appendMessage(role, content) {
   const msgs = document.getElementById('chatMessages')
   if (!msgs) return
@@ -40,7 +56,7 @@ function appendMessage(role, content) {
   div.className = `msg ${role}`
   div.innerHTML = `
     <div class="msg-avatar">${role === 'user' ? '👤' : '⚡'}</div>
-    <div class="msg-bubble">${content.replace(/\n/g, '<br>')}</div>
+    <div class="msg-bubble">${escapeHtml(content).replace(/\n/g, '<br>')}</div>
   `
   msgs.appendChild(div)
   msgs.scrollTop = msgs.scrollHeight
@@ -62,14 +78,29 @@ async function sendMessage() {
   const msgs = document.getElementById('chatMessages')
   const bubble = document.createElement('div')
   bubble.className = 'msg assistant'
-  bubble.innerHTML = `<div class="msg-avatar">⚡</div><div class="msg-bubble" id="streamBubble"></div>`
+  const avatarDiv = document.createElement('div')
+  avatarDiv.className = 'msg-avatar'
+  avatarDiv.textContent = '⚡'
+  const bubbleDiv = document.createElement('div')
+  bubbleDiv.className = 'msg-bubble'
+  const actionsEl = document.createElement('div')
+  const textEl = document.createElement('span')
+  bubbleDiv.appendChild(actionsEl)
+  bubbleDiv.appendChild(textEl)
+  bubble.appendChild(avatarDiv)
+  bubble.appendChild(bubbleDiv)
   msgs.appendChild(bubble)
-  const streamEl = document.getElementById('streamBubble')
+
+  let accumulated = ''
+  const ACTION_LABELS = { lights_on: '💡 Allumage', lights_off: '💡 Extinction', lights_color: '🎨 Couleur' }
+  const actionTags = {}
 
   try {
+    await waitApiToken()
+    const token = getApiToken()
     const response = await fetch('http://localhost:3737/api/ai/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { 'X-App-Token': token } : {}) },
       body: JSON.stringify({ message: msg })
     })
 
@@ -91,18 +122,37 @@ async function sendMessage() {
         try {
           const json = JSON.parse(line.slice(6))
           if (json.token) {
-            streamEl.innerHTML = (streamEl.textContent + json.token).replace(/\n/g, '<br>')
+            accumulated += json.token
+            textEl.innerHTML = escapeHtml(accumulated).replace(/\n/g, '<br>')
             msgs.scrollTop = msgs.scrollHeight
+          }
+          if (json.action) {
+            const room = json.args?.room ? ` · ${json.args.room}` : ''
+            const tag = document.createElement('div')
+            tag.className = 'action-tag loading'
+            tag.textContent = `⚙️ ${ACTION_LABELS[json.action] || json.action}${room}…`
+            actionsEl.appendChild(tag)
+            if (!actionTags[json.action]) actionTags[json.action] = []
+            actionTags[json.action].push(tag)
+            msgs.scrollTop = msgs.scrollHeight
+          }
+          if (json.action_done) {
+            const tag = actionTags[json.action_done]?.shift()
+            if (tag) {
+              tag.className = `action-tag ${json.ok ? 'done' : 'error'}`
+              tag.textContent = tag.textContent.replace('⚙️', json.ok ? '✅' : '❌').replace('…', '')
+            }
           }
         } catch {}
       }
     }
   } catch (err) {
     typing.style.display = 'none'
-    streamEl.textContent = `❌ Erreur : ${err.message}`
+    textEl.textContent = `❌ Erreur : ${err.message}`
+    accumulated = textEl.textContent
   } finally {
     btn.disabled = false
     input.focus()
-    bubble.removeAttribute('id')
+    if (!accumulated.trim() && !actionsEl.children.length) bubble.remove()
   }
 }

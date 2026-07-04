@@ -3,7 +3,28 @@ const fs   = require('fs')
 const path = require('path')
 const pool = require('../backend/database/db')
 
-const SOURCE = process.argv[2] || path.join(require('os').homedir(), 'moncarnetcompte_backup.json')
+function findLatestExport() {
+  const home = require('os').homedir()
+  const dirs = [
+    path.join(home, 'FuturCommandCenter', 'exports'),
+    path.join(home, 'Téléchargements'),
+    path.join(home, 'Downloads'),
+    home
+  ]
+  let latest = null, latestTime = 0
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith('moncarnetcompte_') || !f.endsWith('.json')) continue
+      const full = path.join(dir, f)
+      const t = fs.statSync(full).mtimeMs
+      if (t > latestTime) { latestTime = t; latest = full }
+    }
+  }
+  return latest || path.join(home, 'moncarnetcompte_backup.json')
+}
+
+const SOURCE = process.argv[2] || findLatestExport()
 
 async function run() {
   if (!fs.existsSync(SOURCE)) {
@@ -54,13 +75,15 @@ async function run() {
   }
   console.log(`\n✓ ${imported} transactions importées, ${skipped} ignorées`)
 
-  // Purge des transactions supprimées dans MoncomptePc
-  const backupIds = (data.txs || []).map(t => t.id)
-  if (backupIds.length) {
-    const placeholders = backupIds.map((_, i) => `$${i + 1}`).join(',')
+  // Purge des transactions supprimées dans MoncomptePc — scoper aux comptes importés + filtrer les ids null
+  const backupIds = (data.txs || []).map(t => t.id).filter(id => id != null)
+  const backupAccountIds = [...new Set((data.txs || []).map(t => t.accountId).filter(Boolean))]
+  if (backupIds.length && backupAccountIds.length) {
+    const idPH  = backupIds.map((_, i) => `$${i + 1}`).join(',')
+    const accPH = backupAccountIds.map((_, i) => `$${backupIds.length + i + 1}`).join(',')
     const del = await pool.query(
-      `DELETE FROM transactions WHERE id NOT IN (${placeholders})`,
-      backupIds
+      `DELETE FROM transactions WHERE id NOT IN (${idPH}) AND account_id IN (${accPH})`,
+      [...backupIds, ...backupAccountIds]
     )
     if (del.rowCount > 0) console.log(`✓ ${del.rowCount} transactions obsolètes supprimées`)
   }

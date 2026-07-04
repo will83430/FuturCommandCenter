@@ -18,9 +18,25 @@ let weatherCache = null, weatherCacheTs = 0
 
 const app  = express()
 const PORT = process.env.BACKEND_PORT || 3737
+const BACKEND_TOKEN = process.env.BACKEND_TOKEN || ''
 
-app.use(cors())
+// Restreindre CORS aux origines Electron (null/file:) et localhost
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || /^(null|file:|http:\/\/localhost(:\d+)?)/.test(origin)) cb(null, true)
+    else cb(new Error('Origin non autorisée'))
+  }
+}))
 app.use(express.json())
+
+// Auth : toutes les routes /api/ sauf /api/ping exigent le token
+app.use('/api', (req, res, next) => {
+  if (req.path === '/ping') return next()
+  if (!BACKEND_TOKEN || req.headers['x-app-token'] !== BACKEND_TOKEN) {
+    return res.status(401).json({ error: 'Non autorisé' })
+  }
+  next()
+})
 
 app.use('/api/finances',   financesRoutes)
 app.use('/api/ai',         aiRoutes)
@@ -54,6 +70,61 @@ async function initDatabase() {
 
 app.listen(PORT, async () => {
   await initDatabase()
+  await autoImportMoncompte()
   console.log(`[Server] FuturCommandCenter backend → http://localhost:${PORT}`)
   if (process.send) process.send('ready')
 })
+
+async function autoImportMoncompte() {
+  try {
+    const home = require('os').homedir()
+    const dirs = [path.join(home, 'FuturCommandCenter', 'exports'), path.join(home, 'Téléchargements'), path.join(home, 'Downloads'), home]
+    let latest = null, latestTime = 0
+    for (const dir of dirs) {
+      if (!fs.existsSync(dir)) continue
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.startsWith('moncarnetcompte_') || !f.endsWith('.json')) continue
+        const full = path.join(dir, f)
+        const t = fs.statSync(full).mtimeMs
+        if (t > latestTime) { latestTime = t; latest = full }
+      }
+    }
+    if (!latest) return
+    const data = JSON.parse(fs.readFileSync(latest, 'utf8'))
+    if (!data.txs?.length) return
+
+    // Comptes
+    for (const acc of data.accounts || []) {
+      await pool.query(`INSERT INTO accounts (id,name,icon,type,color,mensualite,plafond) VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT (id) DO UPDATE SET name=$2,icon=$3,color=$5`,
+        [acc.id, acc.name, acc.icon||'', acc.type||'checking', acc.color||'#ffffff', acc.mensualite||0, acc.plafond||0])
+    }
+    // Transactions
+    for (const tx of data.txs) {
+      await pool.query(`INSERT INTO transactions (id,account_id,date,amount_cents,kind,cat,description,planned,recurring)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET
+        planned=$8,amount_cents=$4,cat=$6,description=$7,date=$3,kind=$5`,
+        [tx.id, tx.accountId, tx.date, tx.amountCents, tx.kind, tx.cat||'autre', tx.desc||'', tx.planned||false, tx.recurring||false])
+    }
+    // Purge — scoper aux comptes importés + filtrer les ids null
+    const ids = data.txs.map(t => t.id).filter(id => id != null)
+    const accountIds = [...new Set(data.txs.map(t => t.accountId).filter(Boolean))]
+    if (ids.length && accountIds.length) {
+      const idPH  = ids.map((_,i) => `$${i+1}`).join(',')
+      const accPH = accountIds.map((_,i) => `$${ids.length+i+1}`).join(',')
+      await pool.query(
+        `DELETE FROM transactions WHERE id NOT IN (${idPH}) AND account_id IN (${accPH})`,
+        [...ids, ...accountIds]
+      )
+    }
+    // Anchors
+    for (const a of data.anchors || []) {
+      await pool.query(`INSERT INTO anchors (account_id,month,amount_cents,set_at) VALUES ($1,$2,$3,$4)
+        ON CONFLICT (account_id,month) DO UPDATE SET amount_cents=$3,set_at=$4`,
+        [a.accountId, a.month, a.amountCents, a.setAt||null])
+    }
+    console.log(`[Import] ${data.txs.length} transactions depuis ${path.basename(latest)}`)
+  } catch (e) {
+    console.warn('[Import] Échec auto-import MonCompte:', e.message)
+  }
+}
