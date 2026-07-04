@@ -1,3 +1,12 @@
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 async function renderAI() {
   const el = document.getElementById('page-ai')
   el.innerHTML = `
@@ -47,7 +56,7 @@ function appendMessage(role, content) {
   div.className = `msg ${role}`
   div.innerHTML = `
     <div class="msg-avatar">${role === 'user' ? '👤' : '⚡'}</div>
-    <div class="msg-bubble">${content.replace(/\n/g, '<br>')}</div>
+    <div class="msg-bubble">${escapeHtml(content).replace(/\n/g, '<br>')}</div>
   `
   msgs.appendChild(div)
   msgs.scrollTop = msgs.scrollHeight
@@ -87,9 +96,11 @@ async function sendMessage() {
   const actionTags = {}
 
   try {
+    await waitApiToken()
+    const token = getApiToken()
     const response = await fetch('http://localhost:3737/api/ai/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(token ? { 'X-App-Token': token } : {}) },
       body: JSON.stringify({ message: msg })
     })
 
@@ -112,7 +123,7 @@ async function sendMessage() {
           const json = JSON.parse(line.slice(6))
           if (json.token) {
             accumulated += json.token
-            textEl.innerHTML = accumulated.replace(/\n/g, '<br>')
+            textEl.innerHTML = escapeHtml(accumulated).replace(/\n/g, '<br>')
             msgs.scrollTop = msgs.scrollHeight
           }
           if (json.action) {
@@ -121,11 +132,12 @@ async function sendMessage() {
             tag.className = 'action-tag loading'
             tag.textContent = `⚙️ ${ACTION_LABELS[json.action] || json.action}${room}…`
             actionsEl.appendChild(tag)
-            actionTags[json.action] = tag
+            if (!actionTags[json.action]) actionTags[json.action] = []
+            actionTags[json.action].push(tag)
             msgs.scrollTop = msgs.scrollHeight
           }
           if (json.action_done) {
-            const tag = actionTags[json.action_done]
+            const tag = actionTags[json.action_done]?.shift()
             if (tag) {
               tag.className = `action-tag ${json.ok ? 'done' : 'error'}`
               tag.textContent = tag.textContent.replace('⚙️', json.ok ? '✅' : '❌').replace('…', '')

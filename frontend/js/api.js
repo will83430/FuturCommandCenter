@@ -1,13 +1,23 @@
 const API = 'http://localhost:3737/api'
 
+// Token initialisé via IPC Electron au démarrage
+let _token = ''
+const _tokenReady = window.electronAPI?.getBackendToken
+  ? window.electronAPI.getBackendToken().then(t => { _token = t || '' })
+  : Promise.resolve()
+
 async function apiFetch(path, options = {}) {
-  const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options
-  })
+  await _tokenReady
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  if (_token) headers['X-App-Token'] = _token
+  const res = await fetch(API + path, { ...options, headers })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+// Exposé pour ai.js (fetch SSE manuel)
+function getApiToken() { return _token }
+function waitApiToken() { return _tokenReady }
 
 window.api = {
   finances: {

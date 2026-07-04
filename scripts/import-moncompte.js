@@ -6,7 +6,7 @@ const pool = require('../backend/database/db')
 function findLatestExport() {
   const home = require('os').homedir()
   const dirs = [
-    path.join(__dirname, '../exports'),
+    path.join(home, 'FuturCommandCenter', 'exports'),
     path.join(home, 'Téléchargements'),
     path.join(home, 'Downloads'),
     home
@@ -75,13 +75,15 @@ async function run() {
   }
   console.log(`\n✓ ${imported} transactions importées, ${skipped} ignorées`)
 
-  // Purge des transactions supprimées dans MoncomptePc
-  const backupIds = (data.txs || []).map(t => t.id)
-  if (backupIds.length) {
-    const placeholders = backupIds.map((_, i) => `$${i + 1}`).join(',')
+  // Purge des transactions supprimées dans MoncomptePc — scoper aux comptes importés + filtrer les ids null
+  const backupIds = (data.txs || []).map(t => t.id).filter(id => id != null)
+  const backupAccountIds = [...new Set((data.txs || []).map(t => t.accountId).filter(Boolean))]
+  if (backupIds.length && backupAccountIds.length) {
+    const idPH  = backupIds.map((_, i) => `$${i + 1}`).join(',')
+    const accPH = backupAccountIds.map((_, i) => `$${backupIds.length + i + 1}`).join(',')
     const del = await pool.query(
-      `DELETE FROM transactions WHERE id NOT IN (${placeholders})`,
-      backupIds
+      `DELETE FROM transactions WHERE id NOT IN (${idPH}) AND account_id IN (${accPH})`,
+      [...backupIds, ...backupAccountIds]
     )
     if (del.rowCount > 0) console.log(`✓ ${del.rowCount} transactions obsolètes supprimées`)
   }

@@ -9,6 +9,18 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b'
 const HC_URL = process.env.HOMECONTROL_URL || 'http://localhost:5000'
 const HC_KEY = process.env.HOMECONTROL_KEY || ''
 
+// Avertissement si Ollama n'est pas sur localhost (les données financières seraient envoyées à un serveur externe)
+try {
+  const ollamaHost = new URL(OLLAMA_URL).hostname
+  if (!/^(localhost|127\.0\.0\.1|::1)$/.test(ollamaHost)) {
+    console.warn(`[AI] ⚠️  AVERTISSEMENT SÉCURITÉ : OLLAMA_URL pointe vers ${ollamaHost} (hors localhost). Les données financières et de santé seront envoyées à ce serveur externe.`)
+  }
+} catch {}
+
+function sanitizePromptField(s, maxLen = 60) {
+  return String(s || '').replace(/[\r\n\t]/g, ' ').slice(0, maxLen)
+}
+
 // IPs des ampoules WiZ
 const BULBS = { salon: '192.168.1.171', chambre: '192.168.1.85' }
 
@@ -168,7 +180,7 @@ router.post('/chat', async (req, res) => {
     const planned_expense = parseInt(forecastRow.rows[0].planned_expense || 0)
 
     const balancesText = balanceRow.rows
-      .map(r => `- ${r.name} (${r.type}) : ${fmt(r.balance_cents)}€`)
+      .map(r => `- ${sanitizePromptField(r.name)} (${sanitizePromptField(r.type, 20)}) : ${fmt(r.balance_cents)}€`)
       .join('\n')
 
     const totalDisponible = balanceRow.rows
@@ -188,7 +200,7 @@ SPORT & SANTÉ (moyennes 7 derniers jours) :
 - Body Battery moy : ${h.avg_body_battery ? Math.round(h.avg_body_battery) + '/100' : '—'}
 - HRV nuit moy : ${h.avg_hrv ? Math.round(h.avg_hrv) + ' ms' : '—'}
 - SpO2 moy : ${h.avg_spo2 ? Math.round(h.avg_spo2) + '%' : '—'}
-${la ? `Dernière activité : ${la.name} (${la.type}) le ${new Date(la.date).toLocaleDateString('fr-FR')} — ${la.distance_m ? (la.distance_m/1000).toFixed(2)+'km' : ''} ${la.duration_s ? fmtMin(la.duration_s) : ''}` : ''}` : ''
+${la ? `Dernière activité : ${sanitizePromptField(la.name)} (${sanitizePromptField(la.type, 20)}) le ${new Date(la.date).toLocaleDateString('fr-FR')} — ${la.distance_m ? (la.distance_m/1000).toFixed(2)+'km' : ''} ${la.duration_s ? fmtMin(la.duration_s) : ''}` : ''}` : ''
 
     const systemPrompt = `Tu es l'assistant IA de FuturCommandCenter, le dashboard personnel de l'utilisateur.
 Tu as accès aux données financières et sportives en temps réel. Sois concis et utile. Réponds en français.
@@ -251,8 +263,14 @@ ${healthContext}`
     if (toolCalls) {
       let confirmParts = []
       for (const tc of toolCalls) {
-        const name = tc.function.name
-        const args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : (tc.function.arguments || {})
+        let name, args
+        try {
+          name = tc.function.name
+          args = typeof tc.function.arguments === 'string' ? JSON.parse(tc.function.arguments) : (tc.function.arguments || {})
+        } catch {
+          confirmParts.push('Erreur : arguments invalides.')
+          continue
+        }
         res.write(`data: ${JSON.stringify({ action: name, args })}\n\n`)
         try {
           await executeTool(name, args)
@@ -265,9 +283,7 @@ ${healthContext}`
       }
       // Confirmation directe, sans appeler le modèle
       savedReply = confirmParts.join(' ')
-      for (const ch of savedReply) {
-        res.write(`data: ${JSON.stringify({ token: ch })}\n\n`)
-      }
+      res.write(`data: ${JSON.stringify({ token: savedReply })}\n\n`)
     } else {
       // Pas d'outil → stream direct
       const { fullReply } = await streamOllama(messages, null, res)
@@ -281,6 +297,11 @@ ${healthContext}`
     res.end()
 
   } catch (err) {
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ error: 'Erreur interne' })}\n\n`)
+      res.end()
+      return
+    }
     if (err.code === 'ECONNREFUSED') {
       return res.status(503).json({ error: 'Ollama non disponible. Lance : ollama serve' })
     }

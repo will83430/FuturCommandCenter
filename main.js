@@ -1,6 +1,9 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const { fork } = require('child_process')
+const crypto = require('crypto')
+
+const BACKEND_TOKEN = crypto.randomBytes(32).toString('hex')
 
 let mainWindow
 let backendProcess
@@ -9,7 +12,7 @@ function startBackend() {
   const envPath     = app.isPackaged ? path.join(process.resourcesPath, '.env')            : path.join(__dirname, '.env')
   const garminPath  = app.isPackaged ? path.join(process.resourcesPath, '.garmin-session') : path.join(__dirname, '.garmin-session')
   backendProcess = fork(path.join(__dirname, 'backend/server.js'), [], {
-    env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'production', DOTENV_PATH: envPath, GARMIN_TOKEN_DIR: garminPath }
+    env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'production', DOTENV_PATH: envPath, GARMIN_TOKEN_DIR: garminPath, BACKEND_TOKEN }
   })
   backendProcess.on('message', (msg) => {
     if (msg === 'ready') createWindow()
@@ -39,6 +42,7 @@ function createWindow() {
 
 }
 
+ipcMain.handle('get-backend-token', () => BACKEND_TOKEN)
 ipcMain.on('window-minimize', () => mainWindow.minimize())
 ipcMain.on('window-maximize', () => {
   mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()

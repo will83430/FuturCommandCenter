@@ -18,9 +18,25 @@ let weatherCache = null, weatherCacheTs = 0
 
 const app  = express()
 const PORT = process.env.BACKEND_PORT || 3737
+const BACKEND_TOKEN = process.env.BACKEND_TOKEN || ''
 
-app.use(cors())
+// Restreindre CORS aux origines Electron (null/file:) et localhost
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || /^(null|file:|http:\/\/localhost(:\d+)?)/.test(origin)) cb(null, true)
+    else cb(new Error('Origin non autorisée'))
+  }
+}))
 app.use(express.json())
+
+// Auth : toutes les routes /api/ sauf /api/ping exigent le token
+app.use('/api', (req, res, next) => {
+  if (req.path === '/ping') return next()
+  if (!BACKEND_TOKEN || req.headers['x-app-token'] !== BACKEND_TOKEN) {
+    return res.status(401).json({ error: 'Non autorisé' })
+  }
+  next()
+})
 
 app.use('/api/finances',   financesRoutes)
 app.use('/api/ai',         aiRoutes)
@@ -62,7 +78,7 @@ app.listen(PORT, async () => {
 async function autoImportMoncompte() {
   try {
     const home = require('os').homedir()
-    const dirs = [path.join(__dirname, '../exports'), path.join(home, 'Téléchargements'), path.join(home, 'Downloads'), home]
+    const dirs = [path.join(home, 'FuturCommandCenter', 'exports'), path.join(home, 'Téléchargements'), path.join(home, 'Downloads'), home]
     let latest = null, latestTime = 0
     for (const dir of dirs) {
       if (!fs.existsSync(dir)) continue
@@ -90,9 +106,17 @@ async function autoImportMoncompte() {
         planned=$8,amount_cents=$4,cat=$6,description=$7,date=$3,kind=$5`,
         [tx.id, tx.accountId, tx.date, tx.amountCents, tx.kind, tx.cat||'autre', tx.desc||'', tx.planned||false, tx.recurring||false])
     }
-    // Purge
-    const ids = data.txs.map(t => t.id)
-    if (ids.length) await pool.query(`DELETE FROM transactions WHERE id NOT IN (${ids.map((_,i)=>`$${i+1}`).join(',')})`, ids)
+    // Purge — scoper aux comptes importés + filtrer les ids null
+    const ids = data.txs.map(t => t.id).filter(id => id != null)
+    const accountIds = [...new Set(data.txs.map(t => t.accountId).filter(Boolean))]
+    if (ids.length && accountIds.length) {
+      const idPH  = ids.map((_,i) => `$${i+1}`).join(',')
+      const accPH = accountIds.map((_,i) => `$${ids.length+i+1}`).join(',')
+      await pool.query(
+        `DELETE FROM transactions WHERE id NOT IN (${idPH}) AND account_id IN (${accPH})`,
+        [...ids, ...accountIds]
+      )
+    }
     // Anchors
     for (const a of data.anchors || []) {
       await pool.query(`INSERT INTO anchors (account_id,month,amount_cents,set_at) VALUES ($1,$2,$3,$4)
