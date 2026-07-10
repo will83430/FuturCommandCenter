@@ -23,7 +23,8 @@ async function renderAI() {
       </div>
       <div class="typing" id="typingIndicator" style="display:none">L'assistant réfléchit...</div>
       <div class="chat-input-wrap">
-        <textarea id="chatInput" class="chat-input" rows="2" placeholder="Pose une question sur tes finances..."></textarea>
+        <textarea id="chatInput" class="chat-input" rows="2" placeholder="Pose une question ou clique sur le micro..."></textarea>
+        <button id="chatMic" class="chat-mic" onclick="toggleMic()" title="Parler">🎙️</button>
         <button id="chatSend" class="chat-send" onclick="sendMessage()">Envoyer</button>
         <button class="chat-clear" onclick="clearChat()" title="Vider l'historique">🗑️</button>
       </div>
@@ -154,5 +155,67 @@ async function sendMessage() {
     btn.disabled = false
     input.focus()
     if (!accumulated.trim() && !actionsEl.children.length) bubble.remove()
+  }
+}
+
+// ── Microphone ──────────────────────────────────────────────────────────────
+let _recorder = null
+let _chunks   = []
+
+async function toggleMic() {
+  const btn   = document.getElementById('chatMic')
+  const input = document.getElementById('chatInput')
+
+  if (_recorder && _recorder.state === 'recording') {
+    _recorder.stop()
+    return
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    _chunks   = []
+    _recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+
+    _recorder.ondataavailable = e => { if (e.data.size > 0) _chunks.push(e.data) }
+
+    _recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop())
+      btn.textContent  = '🎙️'
+      btn.classList.remove('mic-active')
+      btn.disabled     = true
+      btn.title        = 'Transcription...'
+
+      try {
+        const blob    = new Blob(_chunks, { type: 'audio/webm' })
+        const form    = new FormData()
+        form.append('audio', blob, 'audio.webm')
+        await waitApiToken()
+        const token = getApiToken()
+        const resp  = await fetch('http://localhost:3737/api/ai/transcribe', {
+          method: 'POST', body: form,
+          headers: { 'X-App-Token': token }
+        })
+        const data    = await resp.json()
+        if (data.text) {
+          input.value = data.text
+          input.focus()
+        } else {
+          input.placeholder = data.error || 'Transcription vide'
+        }
+      } catch (err) {
+        input.placeholder = '❌ Erreur transcription'
+      } finally {
+        btn.disabled  = false
+        btn.title     = 'Parler'
+      }
+    }
+
+    _recorder.start()
+    btn.textContent = '⏹️'
+    btn.classList.add('mic-active')
+    btn.title = 'Arrêter l\'enregistrement'
+
+  } catch (err) {
+    alert('Microphone inaccessible : ' + err.message)
   }
 }

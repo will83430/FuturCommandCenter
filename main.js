@@ -1,12 +1,13 @@
 const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
-const { fork } = require('child_process')
+const { fork, spawn } = require('child_process')
 const crypto = require('crypto')
 
 const BACKEND_TOKEN = crypto.randomBytes(32).toString('hex')
 
 let mainWindow
 let backendProcess
+let whisperProcess
 
 function startBackend() {
   const envPath     = app.isPackaged ? path.join(process.resourcesPath, '.env')            : path.join(__dirname, '.env')
@@ -49,9 +50,20 @@ ipcMain.on('window-maximize', () => {
 })
 ipcMain.on('window-close', () => mainWindow.close())
 
-app.whenReady().then(startBackend)
+function startWhisper() {
+  const venvPython = path.join(__dirname, 'whisper-env/bin/python3')
+  const script     = path.join(__dirname, 'scripts/whisper_server.py')
+  whisperProcess = spawn(venvPython, [script], { stdio: 'inherit' })
+  whisperProcess.on('error', err => console.error('[Whisper] Erreur démarrage:', err.message))
+}
+
+app.whenReady().then(() => {
+  startWhisper()
+  startBackend()
+})
 
 app.on('window-all-closed', () => {
-  if (backendProcess) backendProcess.kill()
+  if (backendProcess)  backendProcess.kill()
+  if (whisperProcess)  whisperProcess.kill()
   if (process.platform !== 'darwin') app.quit()
 })

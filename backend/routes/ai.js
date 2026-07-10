@@ -1,8 +1,12 @@
-const express = require('express')
-const router  = express.Router()
-const axios   = require('axios')
-const dgram   = require('dgram')
-const pool    = require('../database/db')
+const express  = require('express')
+const router   = express.Router()
+const axios    = require('axios')
+const dgram    = require('dgram')
+const multer   = require('multer')
+const pool     = require('../database/db')
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } })
+const WHISPER_URL = 'http://127.0.0.1:8766'
 
 const OLLAMA_URL   = process.env.OLLAMA_URL   || 'http://localhost:11434'
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b'
@@ -45,9 +49,10 @@ function wizSend(ip, params) {
 }
 
 const TOOLS = [
-  { type: 'function', function: { name: 'lights_on',    description: 'Allumer les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
-  { type: 'function', function: { name: 'lights_off',   description: 'Éteindre les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
-  { type: 'function', function: { name: 'lights_color', description: 'Changer la couleur des lumières. Utilise color_name pour les couleurs courantes (rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid) ou r/g/b pour du RGB précis.', parameters: { type: 'object', properties: { color_name: { type: 'string', description: 'Nom de couleur : rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid' }, r: { type: 'integer' }, g: { type: 'integer' }, b: { type: 'integer' } } } } }
+  { type: 'function', function: { name: 'lights_on',         description: 'Allumer les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
+  { type: 'function', function: { name: 'lights_off',        description: 'Éteindre les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
+  { type: 'function', function: { name: 'lights_color',      description: 'Changer la couleur des lumières. Utilise color_name pour les couleurs courantes (rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid) ou r/g/b pour du RGB précis.', parameters: { type: 'object', properties: { color_name: { type: 'string', description: 'Nom de couleur : rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid' }, r: { type: 'integer' }, g: { type: 'integer' }, b: { type: 'integer' }, room: { type: 'string' } } } } },
+  { type: 'function', function: { name: 'lights_brightness', description: 'Régler la luminosité (intensité) des lumières. Utiliser pour : augmente, baisse, tamise, luminosité, intensité. level = 0 à 100.', parameters: { type: 'object', properties: { level: { type: 'integer', description: 'Luminosité de 0 (éteint) à 100 (max). Augmenter = 80-100, tamiser = 20-40, moyen = 50.' }, room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } }, required: ['level'] } } }
 ]
 
 async function executeTool(name, args) {
@@ -64,8 +69,13 @@ async function executeTool(name, args) {
   }
   if (name === 'lights_color') {
     let [r, g, b] = args.color_name ? (COLOR_MAP[args.color_name.toLowerCase()] || [255,255,255]) : [args.r||0, args.g||0, args.b||0]
-    await Promise.all(ips.map(ip => wizSend(ip, { r, g, b })))
+    await Promise.all(ips.map(ip => wizSend(ip, { r, g, b, state: true })))
     return { ok: true, r, g, b }
+  }
+  if (name === 'lights_brightness') {
+    const dimming = Math.max(0, Math.min(100, parseInt(args.level) || 50))
+    await Promise.all(ips.map(ip => wizSend(ip, { dimming, state: dimming > 0 })))
+    return { ok: true, dimming }
   }
   throw new Error(`Outil inconnu : ${name}`)
 }
@@ -117,7 +127,7 @@ router.post('/chat', async (req, res) => {
     )
 
     // Contexte financier + santé
-    const [statsRow, balanceRow, forecastRow, healthRow, lastActivityRow] = await Promise.all([
+    const [statsRow, balanceRow, forecastRow, healthRow, lastActivityRow, weightRow] = await Promise.all([
       pool.query(`
         SELECT
           SUM(CASE WHEN kind='income'  AND date >= date_trunc('month', NOW()) AND planned=false THEN amount_cents END) AS income_month,
@@ -169,7 +179,12 @@ router.post('/chat', async (req, res) => {
       `),
       pool.query(`
         SELECT name, type, date, duration_s, distance_m, calories, avg_hr
-        FROM activities ORDER BY date DESC LIMIT 1
+        FROM activities ORDER BY date DESC LIMIT 10
+      `),
+      pool.query(`
+        SELECT date, weight_kg, fat_pct, muscle_kg
+        FROM body_metrics
+        ORDER BY date DESC LIMIT 5
       `)
     ])
 
@@ -187,9 +202,29 @@ router.post('/chat', async (req, res) => {
       .filter(r => r.type !== 'credit')
       .reduce((s, r) => s + parseInt(r.balance_cents || 0), 0)
 
-    const h  = healthRow.rows[0] || {}
-    const la = lastActivityRow.rows[0]
+    const h           = healthRow.rows[0] || {}
+    const activities  = lastActivityRow.rows
     const fmtMin = s => s ? `${Math.floor(s/3600)}h${String(Math.floor((s%3600)/60)).padStart(2,'0')}` : '—'
+
+    const weightMeasures = weightRow.rows
+    const weightContext = weightMeasures.length ? (() => {
+      const first = weightMeasures[weightMeasures.length - 1]
+      const last  = weightMeasures[0]
+      const trend = (last.weight_kg - first.weight_kg).toFixed(1)
+      const lines = weightMeasures.map((r, i) => {
+        const prev = weightMeasures[i + 1]
+        const diff = prev ? ` (${(r.weight_kg - prev.weight_kg) >= 0 ? '+' : ''}${(r.weight_kg - prev.weight_kg).toFixed(1)} kg)` : ' (mesure la plus ancienne)'
+        return `- ${new Date(r.date).toLocaleDateString('fr-FR')} : ${r.weight_kg} kg${diff}${r.fat_pct ? ` — graisse ${r.fat_pct.toFixed(1)}%` : ''}${r.muscle_kg ? ` — muscle ${r.muscle_kg.toFixed(1)} kg` : ''}`
+      })
+      return `
+POIDS (${weightMeasures.length} mesures disponibles) :
+${lines.join('\n')}
+Tendance globale sur la période : ${trend >= 0 ? '+' : ''}${trend} kg`
+    })() : ''
+
+    const activitiesContext = activities.length ? `
+ACTIVITÉS RÉCENTES (${activities.length} dernières) :
+${activities.map(a => `- ${new Date(a.date).toLocaleDateString('fr-FR')} : ${sanitizePromptField(a.name)} (${sanitizePromptField(a.type, 20)})${a.distance_m ? ' — ' + (a.distance_m/1000).toFixed(2) + ' km' : ''}${a.duration_s ? ' — ' + fmtMin(a.duration_s) : ''}${a.calories ? ' — ' + a.calories + ' kcal' : ''}${a.avg_hr ? ' — FC moy ' + a.avg_hr + ' bpm' : ''}`).join('\n')}` : ''
 
     const healthContext = h.avg_steps ? `
 SPORT & SANTÉ (moyennes 7 derniers jours) :
@@ -199,19 +234,17 @@ SPORT & SANTÉ (moyennes 7 derniers jours) :
 - Sommeil moyen : ${fmtMin(h.avg_sleep_s)}
 - Body Battery moy : ${h.avg_body_battery ? Math.round(h.avg_body_battery) + '/100' : '—'}
 - HRV nuit moy : ${h.avg_hrv ? Math.round(h.avg_hrv) + ' ms' : '—'}
-- SpO2 moy : ${h.avg_spo2 ? Math.round(h.avg_spo2) + '%' : '—'}
-${la ? `Dernière activité : ${sanitizePromptField(la.name)} (${sanitizePromptField(la.type, 20)}) le ${new Date(la.date).toLocaleDateString('fr-FR')} — ${la.distance_m ? (la.distance_m/1000).toFixed(2)+'km' : ''} ${la.duration_s ? fmtMin(la.duration_s) : ''}` : ''}` : ''
+- SpO2 moy : ${h.avg_spo2 ? Math.round(h.avg_spo2) + '%' : '—'}` : ''
 
-    const systemPrompt = `Tu es l'assistant IA de FuturCommandCenter, le dashboard personnel de l'utilisateur.
-Tu as accès aux données financières et sportives en temps réel. Sois concis et utile. Réponds en français.
+    const HEALTH_KEYWORDS  = /poids|sport|santé|activité|course|vélo|cardio|sommeil|stress|pas|calories|muscle|graisse|bpm|hrv|spo2|body.?battery|forme/i
+    const FINANCE_KEYWORDS = /solde|compte|argent|dépens|revenu|budget|virement|prévision|fin de mois|économi|dépense/i
 
-OUTILS DISPONIBLES — tu DOIS les utiliser quand l'utilisateur le demande :
-- lights_on(room?) : allumer les lumières. Pièces : "Salon", "Chambre". Vide = toutes.
-- lights_off(room?) : éteindre les lumières. Pièces : "Salon", "Chambre". Vide = toutes.
-- lights_color(r, g, b) : changer la couleur en valeurs RGB (0-255).
-Quand on te demande de contrôler les lumières, utilise TOUJOURS l'outil correspondant. Ne refuse jamais — tu en as la capacité.
-Après avoir exécuté un outil, réponds en 1 phrase courte uniquement (ex: "Lumière de la chambre éteinte."). Ne simule pas d'actions, n'écris pas "ACTION EFFECTUÉE", ne liste pas les données financières ou sportives sauf si on te le demande explicitement.
+    const isHealth  = HEALTH_KEYWORDS.test(message)
+    const isFinance = FINANCE_KEYWORDS.test(message)
+    const isLight   = /lumi[eè]re|lampe|ampoule|allume|éteins|éteint|couleur|salon|chambre|bleu|rouge|vert|violet|rose|jaune|orange|cyan|blanc/i.test(message)
+    const isGeneral = !isHealth && !isFinance && !isLight
 
+    const financeContext = `
 SOLDES ACTUELS :
 ${balancesText}
 Total disponible (hors crédit) : ${fmt(totalDisponible)}€
@@ -224,16 +257,31 @@ MOIS EN COURS :
 PRÉVISION FIN DE MOIS :
 - Revenus prévus : +${fmt(planned_income)}€
 - Dépenses prévues : -${fmt(planned_expense)}€
-- Solde prévu total : ${fmt(((income_month||0) + (planned_income||0)) - ((expense_month||0) + (planned_expense||0)))}€
-${healthContext}`
+- Solde prévu total : ${fmt(((income_month||0) + (planned_income||0)) - ((expense_month||0) + (planned_expense||0)))}€`
 
-    // Historique récent
-    const history = await pool.query(
+    const contextBlock = isHealth  ? `${healthContext}${activitiesContext}${weightContext}`
+                       : isFinance ? financeContext
+                       : isLight   ? ''
+                       : `${financeContext}${healthContext}${activitiesContext}${weightContext}`
+
+    const systemPrompt = `Tu es l'assistant IA de FuturCommandCenter, le dashboard personnel de l'utilisateur.
+Réponds toujours en français. Sois précis et utilise uniquement les données fournies.
+
+OUTILS DISPONIBLES — tu DOIS les utiliser quand l'utilisateur le demande :
+- lights_on(room?) : allumer les lumières. Pièces : "Salon", "Chambre". Vide = toutes.
+- lights_off(room?) : éteindre les lumières. Pièces : "Salon", "Chambre". Vide = toutes.
+- lights_color(r, g, b) : changer la couleur en valeurs RGB (0-255).
+Quand on te demande de contrôler les lumières, utilise TOUJOURS l'outil correspondant. Après exécution, réponds en 1 phrase courte uniquement.
+${contextBlock}`
+
+    // Historique récent (pas pour les lumières — l'historique perturbe le tool calling)
+    const historyRows = isLight ? [] : (await pool.query(
       'SELECT role, content FROM ai_messages ORDER BY created_at DESC LIMIT 10'
-    )
+    )).rows.reverse()
+
     const messages = [
       { role: 'system', content: systemPrompt },
-      ...history.rows.reverse(),
+      ...historyRows,
       { role: 'user', content: message }
     ]
 
@@ -242,9 +290,7 @@ ${healthContext}`
     res.setHeader('Connection', 'keep-alive')
 
     // N'active les outils que si le message parle de lumières
-    const LIGHT_KEYWORDS = /lumi[eè]re|lampe|ampoule|lumière|allume|éteins|éteint|couleur|salon|chambre|bleu|rouge|vert|violet|rose|jaune|orange|cyan|blanc/i
-    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || ''
-    const mightUseTool = LIGHT_KEYWORDS.test(lastUserMsg)
+    const mightUseTool = isLight
 
     // Appel non-streaming pour détecter les tool_calls de façon fiable
     const detectRes = await axios.post(`${OLLAMA_URL}/api/chat`, {
@@ -254,9 +300,10 @@ ${healthContext}`
     const toolCalls = detectMsg.tool_calls?.length ? detectMsg.tool_calls : null
 
     const ACTION_CONFIRM = {
-      lights_on:    (a) => `Lumière${a.room ? ' '+a.room : 's'} allumée${a.room ? '' : 's'}.`,
-      lights_off:   (a) => `Lumière${a.room ? ' '+a.room : 's'} éteinte${a.room ? '' : 's'}.`,
-      lights_color: (a) => `Couleur ${a.color_name || `R${a.r} V${a.g} B${a.b}`} appliquée.`
+      lights_on:         (a) => `Lumière${a.room ? ' '+a.room : 's'} allumée${a.room ? '' : 's'}.`,
+      lights_off:        (a) => `Lumière${a.room ? ' '+a.room : 's'} éteinte${a.room ? '' : 's'}.`,
+      lights_color:      (a) => `Couleur ${a.color_name || `R${a.r} V${a.g} B${a.b}`} appliquée.`,
+      lights_brightness: (a) => `Luminosité réglée à ${a.level}%.`
     }
 
     let savedReply = ''
@@ -313,6 +360,23 @@ ${healthContext}`
 router.delete('/history', async (req, res) => {
   await pool.query('DELETE FROM ai_messages')
   res.json({ ok: true })
+})
+
+// Transcription vocale via Whisper local
+router.post('/transcribe', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Aucun fichier audio' })
+    const FormData = require('form-data')
+    const form = new FormData()
+    form.append('audio', req.file.buffer, { filename: 'audio.webm', contentType: req.file.mimetype })
+    const response = await axios.post(`${WHISPER_URL}/transcribe`, form, {
+      headers: form.getHeaders(), timeout: 30000
+    })
+    res.json(response.data)
+  } catch (err) {
+    const msg = err.code === 'ECONNREFUSED' ? 'Serveur Whisper non démarré' : err.message
+    res.status(503).json({ error: msg })
+  }
 })
 
 module.exports = router

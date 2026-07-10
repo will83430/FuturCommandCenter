@@ -9,3 +9,4 @@ build/
 .garmin-session
 exports/*
 !exports/.gitkeep
+whisper-env/
