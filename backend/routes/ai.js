@@ -49,9 +49,10 @@ function wizSend(ip, params) {
 }
 
 const TOOLS = [
-  { type: 'function', function: { name: 'lights_on',    description: 'Allumer les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
-  { type: 'function', function: { name: 'lights_off',   description: 'Éteindre les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
-  { type: 'function', function: { name: 'lights_color', description: 'Changer la couleur des lumières. Utilise color_name pour les couleurs courantes (rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid) ou r/g/b pour du RGB précis.', parameters: { type: 'object', properties: { color_name: { type: 'string', description: 'Nom de couleur : rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid' }, r: { type: 'integer' }, g: { type: 'integer' }, b: { type: 'integer' } } } } }
+  { type: 'function', function: { name: 'lights_on',         description: 'Allumer les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
+  { type: 'function', function: { name: 'lights_off',        description: 'Éteindre les lumières. Pièces disponibles : Salon, Chambre. Laisser room vide pour toutes.', parameters: { type: 'object', properties: { room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } } } } },
+  { type: 'function', function: { name: 'lights_color',      description: 'Changer la couleur des lumières. Utilise color_name pour les couleurs courantes (rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid) ou r/g/b pour du RGB précis.', parameters: { type: 'object', properties: { color_name: { type: 'string', description: 'Nom de couleur : rouge, vert, bleu, jaune, violet, rose, orange, cyan, blanc, chaud, froid' }, r: { type: 'integer' }, g: { type: 'integer' }, b: { type: 'integer' }, room: { type: 'string' } } } } },
+  { type: 'function', function: { name: 'lights_brightness', description: 'Régler la luminosité (intensité) des lumières. Utiliser pour : augmente, baisse, tamise, luminosité, intensité. level = 0 à 100.', parameters: { type: 'object', properties: { level: { type: 'integer', description: 'Luminosité de 0 (éteint) à 100 (max). Augmenter = 80-100, tamiser = 20-40, moyen = 50.' }, room: { type: 'string', description: 'Salon ou Chambre. Vide = toutes.' } }, required: ['level'] } } }
 ]
 
 async function executeTool(name, args) {
@@ -68,8 +69,13 @@ async function executeTool(name, args) {
   }
   if (name === 'lights_color') {
     let [r, g, b] = args.color_name ? (COLOR_MAP[args.color_name.toLowerCase()] || [255,255,255]) : [args.r||0, args.g||0, args.b||0]
-    await Promise.all(ips.map(ip => wizSend(ip, { r, g, b })))
+    await Promise.all(ips.map(ip => wizSend(ip, { r, g, b, state: true })))
     return { ok: true, r, g, b }
+  }
+  if (name === 'lights_brightness') {
+    const dimming = Math.max(0, Math.min(100, parseInt(args.level) || 50))
+    await Promise.all(ips.map(ip => wizSend(ip, { dimming, state: dimming > 0 })))
+    return { ok: true, dimming }
   }
   throw new Error(`Outil inconnu : ${name}`)
 }
@@ -294,9 +300,10 @@ ${contextBlock}`
     const toolCalls = detectMsg.tool_calls?.length ? detectMsg.tool_calls : null
 
     const ACTION_CONFIRM = {
-      lights_on:    (a) => `Lumière${a.room ? ' '+a.room : 's'} allumée${a.room ? '' : 's'}.`,
-      lights_off:   (a) => `Lumière${a.room ? ' '+a.room : 's'} éteinte${a.room ? '' : 's'}.`,
-      lights_color: (a) => `Couleur ${a.color_name || `R${a.r} V${a.g} B${a.b}`} appliquée.`
+      lights_on:         (a) => `Lumière${a.room ? ' '+a.room : 's'} allumée${a.room ? '' : 's'}.`,
+      lights_off:        (a) => `Lumière${a.room ? ' '+a.room : 's'} éteinte${a.room ? '' : 's'}.`,
+      lights_color:      (a) => `Couleur ${a.color_name || `R${a.r} V${a.g} B${a.b}`} appliquée.`,
+      lights_brightness: (a) => `Luminosité réglée à ${a.level}%.`
     }
 
     let savedReply = ''
