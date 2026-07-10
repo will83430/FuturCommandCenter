@@ -9,7 +9,9 @@ router.get('/summary', async (req, res) => {
     const totals   = await pool.query(`
       SELECT account_id,
              SUM(CASE WHEN kind = 'income'  THEN amount_cents ELSE 0 END) AS total_income,
-             SUM(CASE WHEN kind = 'expense' THEN amount_cents ELSE 0 END) AS total_expense
+             SUM(CASE WHEN kind = 'expense'      THEN amount_cents ELSE 0 END)
+           + SUM(CASE WHEN kind = 'transfer_out' THEN amount_cents ELSE 0 END)
+           - SUM(CASE WHEN kind = 'transfer_in'  THEN amount_cents ELSE 0 END) AS total_expense
       FROM transactions
       GROUP BY account_id
     `)
@@ -71,9 +73,10 @@ router.get('/monthly', async (req, res) => {
   try {
     const rows = await pool.query(`
       SELECT TO_CHAR(date, 'YYYY-MM') AS month,
-             SUM(CASE WHEN kind = 'income'  THEN amount_cents ELSE 0 END) AS income,
-             SUM(CASE WHEN kind = 'expense' THEN amount_cents ELSE 0 END) AS expense
+             SUM(CASE WHEN kind = 'income'                     THEN amount_cents ELSE 0 END) AS income,
+             SUM(CASE WHEN kind IN ('expense','transfer_out')  THEN amount_cents ELSE 0 END) AS expense
       FROM transactions
+      WHERE planned = false AND account_id = 'cc'
       GROUP BY month
       ORDER BY month DESC
       LIMIT 24
@@ -139,25 +142,28 @@ router.get('/forecast', async (req, res) => {
     // Transactions réelles du mois (déjà passées)
     const done = await pool.query(`
       SELECT
-        SUM(CASE WHEN kind = 'income'  THEN amount_cents ELSE 0 END) AS income,
-        SUM(CASE WHEN kind = 'expense' THEN amount_cents ELSE 0 END) AS expense
+        SUM(CASE WHEN kind = 'income'                     THEN amount_cents ELSE 0 END) AS income,
+        SUM(CASE WHEN kind IN ('expense','transfer_out') THEN amount_cents ELSE 0 END) AS expense
       FROM transactions
-      WHERE planned = false AND date BETWEEN $1 AND $2
+      WHERE planned = false AND account_id = 'cc' AND date BETWEEN $1 AND $2
     `, [monthStart, today])
 
-    // Transactions planifiées restantes ce mois (pas encore passées)
+    // Transactions planifiées du mois (y compris dates déjà passées mais non réalisées)
     const planned = await pool.query(`
       SELECT date, description, amount_cents, kind, cat
       FROM transactions
-      WHERE planned = true AND date BETWEEN $1 AND date_trunc('month', NOW()) + INTERVAL '1 month - 1 day'
+      WHERE planned = true AND account_id = 'cc' AND date BETWEEN $1 AND date_trunc('month', NOW()) + INTERVAL '1 month - 1 day'
       ORDER BY date ASC
-    `, [today])
+    `, [monthStart])
 
     const doneIncome  = parseInt(done.rows[0].income  || 0)
     const doneExpense = parseInt(done.rows[0].expense || 0)
 
     const plannedIncome  = planned.rows.filter(r => r.kind === 'income' ).reduce((s, r) => s + parseInt(r.amount_cents), 0)
-    const plannedExpense = planned.rows.filter(r => r.kind === 'expense').reduce((s, r) => s + parseInt(r.amount_cents), 0)
+    const plannedExpense = planned.rows.reduce((s, r) => {
+      if (r.kind === 'expense' || r.kind === 'transfer_out') return s + parseInt(r.amount_cents)
+      return s
+    }, 0)
 
     res.json({
       done: { income: doneIncome, expense: doneExpense },
