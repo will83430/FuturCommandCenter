@@ -29,7 +29,9 @@ Dashboard personnel — Finances · Sport & Santé · Assistant IA · Domotique
 ### 🤖 Assistant IA
 
 - Chat avec Ollama (100% local, aucune donnée envoyée à l'extérieur)
-- Contexte financier injecté automatiquement (soldes, dépenses du mois, prévisions)
+- Contexte financier et santé injecté automatiquement (soldes, dépenses du mois, prévisions, activités, HRV, Body Battery…)
+- Saisie vocale via Whisper local (micro)
+- Contrôle des lumières WiZ par commande vocale/texte (allumer, éteindre, couleur, luminosité)
 - Historique de conversation persisté en base
 
 ### 🏠 Domotique
@@ -42,11 +44,12 @@ Dashboard personnel — Finances · Sport & Santé · Assistant IA · Domotique
 
 ## Prérequis
 
-| Outil      | Version          |
-| ---------- | ---------------- |
-| Node.js    | 18+              |
-| PostgreSQL | 14+              |
-| Ollama     | dernière version |
+| Outil      | Version                              |
+| ---------- | ------------------------------------- |
+| Node.js    | 18+                                   |
+| PostgreSQL | 14+                                   |
+| Ollama     | dernière version                      |
+| Python     | 3.10+ (transcription vocale Whisper)  |
 
 ---
 
@@ -83,11 +86,19 @@ GARMIN_PASSWORD=ton_mot_de_passe
 
 # Ollama (local)
 OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:8b
+OLLAMA_MODEL=qwen2.5:7b
 
 # Domotique (optionnel)
 HOMECONTROL_URL=http://localhost:5000
 HOMECONTROL_KEY=ta_cle_api
+
+# Météo (coordonnées de ta ville)
+WEATHER_LAT=50.85
+WEATHER_LNG=4.35
+
+# Ampoules WiZ (IP locales, protocole UDP)
+WIZ_SALON_IP=192.168.1.100
+WIZ_CHAMBRE_IP=192.168.1.101
 ```
 
 ### 3. Créer la base de données
@@ -102,7 +113,7 @@ psql -U postgres -d futur_command_center -f backend/database/migrations/002_heal
 
 ```bash
 # Installer Ollama : https://ollama.com
-ollama pull llama3.1:8b
+ollama pull qwen2.5:7b
 ```
 
 ### 5. Connexion Garmin (première fois)
@@ -110,6 +121,17 @@ ollama pull llama3.1:8b
 ```bash
 node scripts/garmin-login.js
 ```
+
+### 6. Configurer la transcription vocale (Whisper)
+
+`main.js` lance automatiquement un serveur Whisper local (`scripts/whisper_server.py`, port 8766) depuis un environnement virtuel Python `whisper-env/` à la racine du projet :
+
+```bash
+python3 -m venv whisper-env
+./whisper-env/bin/pip install flask faster-whisper
+```
+
+Sans cet environnement, le micro du chat IA reste silencieusement inactif (erreur visible uniquement dans les logs du processus principal).
 
 ---
 
@@ -155,7 +177,7 @@ FuturCommandCenter/
 │   │   ├── db.js
 │   │   └── migrations/
 │   ├── routes/
-│   │   ├── ai.js          # Chat Ollama + contexte financier
+│   │   ├── ai.js          # Chat Ollama + contexte financier/santé + lumières WiZ + transcription
 │   │   ├── domotique.js   # API HomeControl / WoL
 │   │   ├── finances.js    # Résumé, transactions, prévisions
 │   │   └── health.js      # Garmin sync, GPX parsing, body metrics
@@ -166,7 +188,9 @@ FuturCommandCenter/
 │   └── index.html
 ├── scripts/
 │   ├── garmin-login.js
-│   └── import-moncompte.js
+│   ├── import-moncompte.js
+│   └── whisper_server.py  # Serveur de transcription vocale (Flask + faster-whisper)
+├── whisper-env/            # venv Python pour Whisper (à créer, voir Installation)
 ├── main.js                # Electron main process
 ├── preload.js
 └── package.json

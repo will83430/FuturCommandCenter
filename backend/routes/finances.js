@@ -13,6 +13,7 @@ router.get('/summary', async (req, res) => {
            + SUM(CASE WHEN kind = 'transfer_out' THEN amount_cents ELSE 0 END)
            - SUM(CASE WHEN kind = 'transfer_in'  THEN amount_cents ELSE 0 END) AS total_expense
       FROM transactions
+      WHERE neutral = false
       GROUP BY account_id
     `)
     res.json({ accounts: accounts.rows, totals: totals.rows })
@@ -58,7 +59,7 @@ router.get('/by-category', async (req, res) => {
              SUM(amount_cents) AS total,
              COUNT(*) AS nb
       FROM transactions
-      WHERE date BETWEEN $1 AND $2
+      WHERE date BETWEEN $1 AND $2 AND neutral = false
       GROUP BY cat, kind
       ORDER BY total DESC
     `, [dateFrom, dateTo])
@@ -76,7 +77,7 @@ router.get('/monthly', async (req, res) => {
              SUM(CASE WHEN kind = 'income'                     THEN amount_cents ELSE 0 END) AS income,
              SUM(CASE WHEN kind IN ('expense','transfer_out')  THEN amount_cents ELSE 0 END) AS expense
       FROM transactions
-      WHERE planned = false AND account_id = 'cc'
+      WHERE planned = false AND account_id = 'cc' AND neutral = false
       GROUP BY month
       ORDER BY month DESC
       LIMIT 24
@@ -119,7 +120,7 @@ router.get('/balance', async (req, res) => {
       LEFT JOIN latest_anchor anc ON anc.account_id = a.id
       LEFT JOIN transactions t ON t.account_id = a.id
         AND t.planned = false
-        AND t.date >= (TO_DATE(anc.month, 'YYYY-MM') + INTERVAL '1 month')::date
+        AND (anc.month IS NULL OR t.date >= (TO_DATE(anc.month, 'YYYY-MM') + INTERVAL '1 month')::date)
       GROUP BY a.id, a.name, a.icon, a.color, a.type, anc.amount_cents, anc.month
       ORDER BY a.name
     `)
@@ -145,14 +146,14 @@ router.get('/forecast', async (req, res) => {
         SUM(CASE WHEN kind = 'income'                     THEN amount_cents ELSE 0 END) AS income,
         SUM(CASE WHEN kind IN ('expense','transfer_out') THEN amount_cents ELSE 0 END) AS expense
       FROM transactions
-      WHERE planned = false AND account_id = 'cc' AND date BETWEEN $1 AND $2
+      WHERE planned = false AND account_id = 'cc' AND neutral = false AND date BETWEEN $1 AND $2
     `, [monthStart, today])
 
     // Transactions planifiées du mois (y compris dates déjà passées mais non réalisées)
     const planned = await pool.query(`
       SELECT date, description, amount_cents, kind, cat
       FROM transactions
-      WHERE planned = true AND account_id = 'cc' AND date BETWEEN $1 AND date_trunc('month', NOW()) + INTERVAL '1 month - 1 day'
+      WHERE planned = true AND account_id = 'cc' AND neutral = false AND date BETWEEN $1 AND date_trunc('month', NOW()) + INTERVAL '1 month - 1 day'
       ORDER BY date ASC
     `, [monthStart])
 

@@ -11,8 +11,8 @@ const healthRoutes     = require('./routes/health')
 const domotiqueRoutes  = require('./routes/domotique')
 const axios            = require('axios')
 
-const WEATHER_LAT = process.env.WEATHER_LAT || '50.85'
-const WEATHER_LNG = process.env.WEATHER_LNG || '4.35'
+const WEATHER_LAT = process.env.WEATHER_LAT || '0'
+const WEATHER_LNG = process.env.WEATHER_LNG || '0'
 const WMO = {0:['☀️','Ensoleillé'],1:['🌤️','Peu nuageux'],2:['⛅','Partiellement nuageux'],3:['🌥️','Couvert'],45:['🌫️','Brouillard'],48:['🌫️','Brouillard givrant'],51:['🌦️','Bruine légère'],53:['🌦️','Bruine'],55:['🌧️','Bruine forte'],61:['🌧️','Pluie légère'],63:['🌧️','Pluie'],65:['🌧️','Pluie forte'],71:['🌨️','Neige légère'],73:['🌨️','Neige'],75:['❄️','Neige forte'],80:['🌦️','Averses légères'],81:['🌧️','Averses'],82:['⛈️','Averses fortes'],95:['⛈️','Orage'],99:['⛈️','Orage violent']}
 let weatherCache = null, weatherCacheTs = 0
 
@@ -101,10 +101,10 @@ async function autoImportMoncompte() {
     }
     // Transactions
     for (const tx of data.txs) {
-      await pool.query(`INSERT INTO transactions (id,account_id,date,amount_cents,kind,cat,description,planned,recurring)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO UPDATE SET
-        planned=$8,amount_cents=$4,cat=$6,description=$7,date=$3,kind=$5`,
-        [tx.id, tx.accountId, tx.date, tx.amountCents, tx.kind, tx.cat||'autre', tx.desc||'', tx.planned||false, tx.recurring||false])
+      await pool.query(`INSERT INTO transactions (id,account_id,date,amount_cents,kind,cat,description,planned,recurring,neutral)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO UPDATE SET
+        planned=$8,amount_cents=$4,cat=$6,description=$7,date=$3,kind=$5,neutral=$10`,
+        [tx.id, tx.accountId, tx.date, tx.amountCents, tx.kind, tx.cat||'autre', tx.desc||'', tx.planned||false, tx.recurring||false, tx.neutral||false])
     }
     // Purge — scoper aux comptes importés + filtrer les ids null
     const ids = data.txs.map(t => t.id).filter(id => id != null)

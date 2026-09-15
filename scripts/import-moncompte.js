@@ -60,12 +60,12 @@ async function run() {
     for (const tx of batch) {
       try {
         await pool.query(`
-          INSERT INTO transactions (id, account_id, date, amount_cents, kind, cat, description, planned, recurring)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          INSERT INTO transactions (id, account_id, date, amount_cents, kind, cat, description, planned, recurring, neutral)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
           ON CONFLICT (id) DO UPDATE SET
-            planned=$8, amount_cents=$4, cat=$6, description=$7, date=$3, kind=$5
+            planned=$8, amount_cents=$4, cat=$6, description=$7, date=$3, kind=$5, neutral=$10
         `, [tx.id, tx.accountId, tx.date, tx.amountCents, tx.kind,
-            tx.cat || 'autre', tx.desc || '', tx.planned || false, tx.recurring || false])
+            tx.cat || 'autre', tx.desc || '', tx.planned || false, tx.recurring || false, tx.neutral || false])
         imported++
       } catch {
         skipped++

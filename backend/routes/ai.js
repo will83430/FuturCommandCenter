@@ -25,8 +25,8 @@ function sanitizePromptField(s, maxLen = 60) {
   return String(s || '').replace(/[\r\n\t]/g, ' ').slice(0, maxLen)
 }
 
-// IPs des ampoules WiZ
-const BULBS = { salon: '192.168.1.171', chambre: '192.168.1.85' }
+// IPs des ampoules WiZ (configurées via .env)
+const BULBS = { salon: process.env.WIZ_SALON_IP || '', chambre: process.env.WIZ_CHAMBRE_IP || '' }
 
 // Couleurs nommées → RGB
 const COLOR_MAP = {
@@ -81,7 +81,7 @@ async function executeTool(name, args) {
 }
 
 async function streamOllama(messages, tools, res) {
-  const reqBody = { model: OLLAMA_MODEL, messages, stream: true }
+  const reqBody = { model: OLLAMA_MODEL, messages, stream: true, options: { num_ctx: 8192 } }
   if (tools) reqBody.tools = tools
   const ollamaRes = await axios.post(`${OLLAMA_URL}/api/chat`, reqBody, { responseType: 'stream' })
   let fullReply = '', toolCalls = null
@@ -133,6 +133,7 @@ router.post('/chat', async (req, res) => {
           SUM(CASE WHEN kind='income'  AND date >= date_trunc('month', NOW()) AND planned=false THEN amount_cents END) AS income_month,
           SUM(CASE WHEN kind='expense' AND date >= date_trunc('month', NOW()) AND planned=false THEN amount_cents END) AS expense_month
         FROM transactions
+        WHERE neutral = false
       `),
       pool.query(`
         WITH latest_anchor AS (
@@ -154,7 +155,7 @@ router.post('/chat', async (req, res) => {
         FROM accounts a
         LEFT JOIN latest_anchor anc ON anc.account_id = a.id
         LEFT JOIN transactions t ON t.account_id = a.id AND t.planned=false
-          AND t.date >= (TO_DATE(anc.month,'YYYY-MM') + INTERVAL '1 month')::date
+          AND (anc.month IS NULL OR t.date >= (TO_DATE(anc.month,'YYYY-MM') + INTERVAL '1 month')::date)
         GROUP BY a.id, a.name, a.type, anc.amount_cents, anc.month
         ORDER BY a.name
       `),
@@ -163,7 +164,7 @@ router.post('/chat', async (req, res) => {
           SUM(CASE WHEN kind='income'  AND planned=true THEN amount_cents END) AS planned_income,
           SUM(CASE WHEN kind='expense' AND planned=true THEN amount_cents END) AS planned_expense
         FROM transactions
-        WHERE date BETWEEN NOW() AND date_trunc('month', NOW()) + INTERVAL '1 month - 1 day'
+        WHERE neutral = false AND date BETWEEN NOW() AND date_trunc('month', NOW()) + INTERVAL '1 month - 1 day'
       `),
       pool.query(`
         SELECT
@@ -294,7 +295,7 @@ ${contextBlock}`
 
     // Appel non-streaming pour détecter les tool_calls de façon fiable
     const detectRes = await axios.post(`${OLLAMA_URL}/api/chat`, {
-      model: OLLAMA_MODEL, messages, ...(mightUseTool ? { tools: TOOLS } : {}), stream: false
+      model: OLLAMA_MODEL, messages, ...(mightUseTool ? { tools: TOOLS } : {}), stream: false, options: { num_ctx: 8192 }
     })
     const detectMsg = detectRes.data?.message || {}
     const toolCalls = detectMsg.tool_calls?.length ? detectMsg.tool_calls : null

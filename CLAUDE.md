@@ -57,10 +57,10 @@ DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD
 BACKEND_PORT=3737
 GARMIN_EMAIL / GARMIN_PASSWORD
 OLLAMA_URL=http://localhost:11434   # doit rester localhost
-OLLAMA_MODEL=llama3.1:8b
+OLLAMA_MODEL=qwen2.5:7b
 HOMECONTROL_URL / HOMECONTROL_KEY   # domotique optionnel
-WEATHER_LAT / WEATHER_LNG           # coordonnées météo
-ANTHROPIC_API_KEY                   # si migration vers Claude API
+WEATHER_LAT / WEATHER_LNG           # coordonnées météo (fallback neutre '0'/'0' si absent)
+WIZ_SALON_IP / WIZ_CHAMBRE_IP       # IPs locales des ampoules WiZ (UDP)
 ```
 
 Le fichier `.env` est exclu du git. Ne jamais committer les credentials.

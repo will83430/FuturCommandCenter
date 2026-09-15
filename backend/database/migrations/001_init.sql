@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS transactions (
   description  TEXT,
   planned      BOOLEAN DEFAULT false,
   recurring    BOOLEAN DEFAULT false,
+  neutral      BOOLEAN DEFAULT false,
   created_at   TIMESTAMP DEFAULT NOW()
 );
+
+-- Ajout rétroactif de la colonne neutral (déjà exécuté ci-dessus pour les nouvelles installs)
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS neutral BOOLEAN DEFAULT false;
 
 -- Récurrences
 CREATE TABLE IF NOT EXISTS recurrences (
